@@ -193,7 +193,7 @@ archive_read_format_ar_read_header(struct archive_read *a,
 	if (strncmp(h + AR_fmag_offset, "`\n", 2) != 0) {
 		archive_set_error(&a->archive, EINVAL,
 		    "Incorrect file header signature");
-		return (ARCHIVE_FATAL);
+		return (ARCHIVE_WARN);
 	}
 
 	/* Copy filename into work buffer. */
@@ -252,15 +252,8 @@ archive_read_format_ar_read_header(struct archive_read *a,
 	 * and are not terminated in '/', so we don't trim anything
 	 * that starts with '/'.)
 	 */
-	if (filename[0] != '/' && p > filename && *p == '/') {
+	if (filename[0] != '/' && *p == '/')
 		*p = '\0';
-	}
-
-	if (p < filename) {
-		archive_set_error(&a->archive, ARCHIVE_ERRNO_MISC,
-		    "Found entry with empty filename");
-		return (ARCHIVE_FATAL);
-	}
 
 	/*
 	 * '//' is the GNU filename table.
@@ -282,12 +275,12 @@ archive_read_format_ar_read_header(struct archive_read *a,
 		if (entry_size == 0) {
 			archive_set_error(&a->archive, EINVAL,
 			    "Invalid string table");
-			return (ARCHIVE_FATAL);
+			return (ARCHIVE_WARN);
 		}
 		if (ar->strtab != NULL) {
 			archive_set_error(&a->archive, EINVAL,
 			    "More than one string tables exist");
-			return (ARCHIVE_FATAL);
+			return (ARCHIVE_WARN);
 		}
 
 		/* Read the filename table into memory. */
@@ -325,11 +318,11 @@ archive_read_format_ar_read_header(struct archive_read *a,
 		 */
 		if (ar->strtab == NULL || number > ar->strtab_size) {
 			archive_set_error(&a->archive, EINVAL,
-			    "Can't find long filename for GNU/SVR4 archive entry");
+			    "Can't find long filename for entry");
 			archive_entry_copy_pathname(entry, filename);
 			/* Parse the time, owner, mode, size fields. */
 			ar_parse_common_header(ar, entry, h);
-			return (ARCHIVE_FATAL);
+			return (ARCHIVE_WARN);
 		}
 
 		archive_entry_copy_pathname(entry, &ar->strtab[(size_t)number]);
@@ -536,7 +529,7 @@ bad_string_table:
 	    "Invalid string table");
 	free(ar->strtab);
 	ar->strtab = NULL;
-	return (ARCHIVE_FATAL);
+	return (ARCHIVE_WARN);
 }
 
 static uint64_t
