@@ -156,6 +156,12 @@ read_archive(struct bsdtar *bsdtar, char mode)
 		if (bsdtar->option_fast_read &&
 		    unmatched_inclusions(bsdtar) == 0)
 			break;
+		const char *p = archive_entry_pathname(entry);
+		if (p == NULL || p[0] == '\0') {
+			lafe_warnc(0, "Archive entry has empty or unreadable filename ... skipping.");
+			bsdtar->return_value = 1;
+			continue;
+		}
 
 		r = archive_read_next_header(a, &entry);
 		if (r == ARCHIVE_EOF)
