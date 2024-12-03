@@ -131,16 +131,22 @@ get_time_t_max(void)
 #if defined(TIME_T_MAX)
 	return TIME_T_MAX;
 #else
-	static time_t t;
-	time_t a;
-	if (t == 0) {
-		a = 1;
-		while (a > t) {
-			t = a;
-			a = a * 2 + 1;
+	/* ISO C allows time_t to be a floating-point type,
+	   but POSIX requires an integer type.  The following
+	   should work on any system that follows the POSIX
+	   conventions. */
+	if (((time_t)0) < ((time_t)-1)) {
+		/* Time_t is unsigned */
+		return (~(time_t)0);
+	} else {
+		/* Time_t is signed. */
+		/* Assume it's the same as int64_t or int32_t */
+		if (sizeof(time_t) == sizeof(int64_t)) {
+			return (time_t)INT64_MAX;
+		} else {
+			return (time_t)INT32_MAX;
 		}
 	}
-	return t;
 #endif
 }
 
@@ -150,20 +156,17 @@ get_time_t_min(void)
 #if defined(TIME_T_MIN)
 	return TIME_T_MIN;
 #else
-	/* 't' will hold the minimum value, which will be zero (if
-	 * time_t is unsigned) or -2^n (if time_t is signed). */
-	static int computed;
-	static time_t t;
-	time_t a;
-	if (computed == 0) {
-		a = (time_t)-1;
-		while (a < t) {
-			t = a;
-			a = a * 2;
-		}			
-		computed = 1;
+	if (((time_t)0) < ((time_t)-1)) {
+		/* Time_t is unsigned */
+		return (time_t)0;
+	} else {
+		/* Time_t is signed. */
+		if (sizeof(time_t) == sizeof(int64_t)) {
+			return (time_t)INT64_MIN;
+		} else {
+			return (time_t)INT32_MIN;
+		}
 	}
-	return t;
 #endif
 }
 
@@ -1327,7 +1330,7 @@ parse_keyword(struct archive_read *a, struct mtree *mtree,
 			int64_t m;
 			int64_t my_time_t_max = get_time_t_max();
 			int64_t my_time_t_min = get_time_t_min();
-			long ns;
+			long ns = 0;
 
 			*parsed_kws |= MTREE_HAS_MTIME;
 			m = mtree_atol10(&val);
@@ -1533,6 +1536,10 @@ parse_escapes(char *src, struct mtree_entry *mentry)
 				c = '\v';
 				++src;
 				break;
+			case '\\':
+				c = '\\';
+				++src;
+				break;
 			}
 		}
 		*dest++ = c;
@@ -1676,8 +1683,7 @@ readline(struct archive_read *a, struct mtree *mtree, char **start, ssize_t limi
 	ssize_t total_size = 0;
 	ssize_t find_off = 0;
 	const void *t;
-	const char *s;
-	void *p;
+	void *nl;
 	char *u;
 
 	/* Accumulate line in a line buffer. */
@@ -1688,11 +1694,10 @@ readline(struct archive_read *a, struct mtree *mtree, char **start, ssize_t limi
 			return (0);
 		if (bytes_read < 0)
 			return (ARCHIVE_FATAL);
-		s = t;  /* Start of line? */
-		p = memchr(t, '\n', bytes_read);
-		/* If we found '\n', trim the read. */
-		if (p != NULL) {
-			bytes_read = 1 + ((const char *)p) - s;
+		nl = memchr(t, '\n', bytes_read);
+		/* If we found '\n', trim the read to end exactly there. */
+		if (nl != NULL) {
+			bytes_read = ((const char *)nl) - ((const char *)t) + 1;
 		}
 		if (total_size + bytes_read + 1 > limit) {
 			archive_set_error(&a->archive,
@@ -1706,38 +1711,34 @@ readline(struct archive_read *a, struct mtree *mtree, char **start, ssize_t limi
 			    "Can't allocate working buffer");
 			return (ARCHIVE_FATAL);
 		}
+		/* Append new bytes to string. */
 		memcpy(mtree->line.s + total_size, t, bytes_read);
 		__archive_read_consume(a, bytes_read);
 		total_size += bytes_read;
-		/* Null terminate. */
 		mtree->line.s[total_size] = '\0';
-		/* If we found an unescaped '\n', clean up and return. */
+
 		for (u = mtree->line.s + find_off; *u; ++u) {
 			if (u[0] == '\n') {
+				/* Ends with unescaped newline. */
 				*start = mtree->line.s;
 				return total_size;
-			}
-			if (u[0] == '#') {
-				if (p == NULL)
+			} else if (u[0] == '#') {
+				/* Ends with comment sequence #...\n */
+				if (nl == NULL) {
+					/* But we've not found the \n yet */
 					break;
-				*start = mtree->line.s;
-				return total_size;
+				}
+			} else if (u[0] == '\\') {
+				if (u[1] == '\n') {
+					/* Trim escaped newline. */
+					total_size -= 2;
+					mtree->line.s[total_size] = '\0';
+					break;
+				} else if (u[1] != '\0') {
+					/* Skip the two-char escape sequence */
+					++u;
+				}
 			}
-			if (u[0] != '\\')
-				continue;
-			if (u[1] == '\\') {
-				++u;
-				continue;
-			}
-			if (u[1] == '\n') {
-				memmove(u, u + 1,
-				    total_size - (u - mtree->line.s) + 1);
-				--total_size;
-				++u;
-				break;
-			}
-			if (u[1] == '\0')
-				break;
 		}
 		find_off = u - mtree->line.s;
 	}
