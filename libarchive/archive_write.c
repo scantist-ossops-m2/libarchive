@@ -213,6 +213,10 @@ __archive_write_allocate_filter(struct archive *_a)
 	struct archive_write_filter *f;
 
 	f = calloc(1, sizeof(*f));
+
+	if (f == NULL)
+		return (NULL);
+
 	f->archive = _a;
 	if (a->filter_first == NULL)
 		a->filter_first = f;
@@ -469,6 +473,10 @@ archive_write_open(struct archive *_a, void *client_data,
 	a->client_data = client_data;
 
 	client_filter = __archive_write_allocate_filter(_a);
+
+	if (client_filter == NULL)
+		return (ARCHIVE_FATAL);
+
 	client_filter->open = archive_write_client_open;
 	client_filter->write = archive_write_client_write;
 	client_filter->close = archive_write_client_close;
